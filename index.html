@@ -59,6 +59,7 @@
             // 从URL获取音频参数
             const urlParams = new URLSearchParams(window.location.search);
             const audioFile = urlParams.get('audio');
+            const autoPlay = urlParams.get('autoplay') === 'true';
             
             // 验证音频参数
             if (!audioFile) {
@@ -70,24 +71,50 @@
             // 初始化播放器
             initPlayer(audioFile);
             
+            // 自动播放逻辑
+            if (autoPlay) {
+                setTimeout(() => {
+                    audioPlayer.play().catch(e => {
+                        console.log('自动播放被阻止，需要用户交互');
+                        statusText.textContent = "点击页面任意处开始播放";
+                        
+                        const playOnClick = () => {
+                            audioPlayer.play().catch(e => {
+                                statusText.textContent = "播放失败: " + e.message;
+                            });
+                            document.removeEventListener('click', playOnClick);
+                        };
+                        document.addEventListener('click', playOnClick);
+                    });
+                }, 1000);
+            }
+            
             // 复制URL功能
             copyUrlBtn.addEventListener('click', function() {
                 currentUrlInput.select();
-                document.execCommand('copy');
-                statusText.textContent = "URL已复制到剪贴板";
-                setTimeout(() => {
-                    updateStatus();
-                }, 2000);
+                navigator.clipboard.writeText(currentUrlInput.value)
+                    .then(() => {
+                        statusText.textContent = "URL已复制到剪贴板";
+                        setTimeout(updateStatus, 2000);
+                    })
+                    .catch(err => {
+                        currentUrlInput.select();
+                        document.execCommand('copy');
+                        statusText.textContent = "URL已复制";
+                        setTimeout(updateStatus, 2000);
+                    });
             });
             
             // 初始化播放器函数
             function initPlayer(file) {
-                // 设置音频源
-                audioPlayer.src = `audio/${encodeURIComponent(file)}`;
+                // 设置音频源 - 修改为Netlify路径
+                audioPlayer.src = `/audio/${encodeURIComponent(file)}`;
+                audioPlayer.crossOrigin = "anonymous"; // 添加CORS支持
+                
                 currentUrlInput.value = window.location.href;
                 
                 // 设置显示名称
-                const displayName = file.replace(/\.[^/.]+$/, "").replace(/_/g, ' ');
+                const displayName = getDisplayName(file);
                 document.title = `${displayName} - NFC音频`;
                 audioTitle.textContent = displayName;
                 
@@ -110,6 +137,19 @@
                 });
                 
                 // 音频事件监听
+                setupAudioEventListeners();
+            }
+            
+            // 获取显示名称
+            function getDisplayName(filename) {
+                return filename
+                    .replace(/\.[^/.]+$/, "") // 移除扩展名
+                    .replace(/[_-]/g, ' ')    // 替换下划线和连字符为空格
+                    .replace(/\b\w/g, l => l.toUpperCase()); // 首字母大写
+            }
+            
+            // 设置音频事件监听器
+            function setupAudioEventListeners() {
                 audioPlayer.addEventListener('play', updateStatus);
                 audioPlayer.addEventListener('pause', updateStatus);
                 audioPlayer.addEventListener('timeupdate', updateProgress);
@@ -122,9 +162,29 @@
                     progressBar.style.width = '0%';
                 });
                 audioPlayer.addEventListener('error', function() {
-                    statusText.textContent = "加载音频失败";
-                    disableControls();
+                    handleAudioError();
                 });
+                audioPlayer.addEventListener('loadstart', function() {
+                    statusText.textContent = "开始加载音频...";
+                });
+                audioPlayer.addEventListener('canplay', function() {
+                    statusText.textContent = "音频加载完成，准备播放";
+                });
+            }
+            
+            // 处理音频加载错误
+            function handleAudioError() {
+                const errorCode = audioPlayer.error ? audioPlayer.error.code : '未知错误';
+                const errorMessages = {
+                    1: "音频加载被中止",
+                    2: "网络错误，请检查连接",
+                    3: "音频解码错误",
+                    4: "音频格式不支持"
+                };
+                
+                statusText.textContent = `加载失败: ${errorMessages[errorCode] || '未知错误'}`;
+                console.error('音频错误详情:', audioPlayer.error);
+                disableControls();
             }
             
             // 更新进度条
@@ -146,9 +206,15 @@
             
             // 更新状态文本
             function updateStatus() {
-                statusText.textContent = audioPlayer.paused ? 
-                    (audioPlayer.currentTime > 0 ? "已暂停" : "准备就绪") : 
-                    "播放中...";
+                if (audioPlayer.error) {
+                    statusText.textContent = "播放错误";
+                } else if (audioPlayer.readyState < 3) {
+                    statusText.textContent = "加载中...";
+                } else {
+                    statusText.textContent = audioPlayer.paused ? 
+                        (audioPlayer.currentTime > 0 ? "已暂停" : "准备就绪") : 
+                        "播放中...";
+                }
             }
             
             // 禁用控制元素
@@ -161,6 +227,7 @@
             
             // 格式化时间显示
             function formatTime(seconds) {
+                if (isNaN(seconds)) return "0:00";
                 const mins = Math.floor(seconds / 60);
                 const secs = Math.floor(seconds % 60);
                 return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
