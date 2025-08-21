@@ -38,7 +38,8 @@
         </div>
     </div>
 
-    <audio id="audioPlayer"></audio>
+    <!-- 关键修改：添加 muted 属性 -->
+    <audio id="audioPlayer" muted></audio>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -71,22 +72,43 @@
             // 初始化播放器
             initPlayer(audioFile);
             
-            // 自动播放逻辑
+            // 新的自动播放逻辑 - 静音播放后取消静音
             if (autoPlay) {
+                // 设置一个短暂的延迟，确保音频元素已就绪
                 setTimeout(() => {
-                    audioPlayer.play().catch(e => {
-                        console.log('自动播放被阻止，需要用户交互');
-                        statusText.textContent = "点击页面任意处开始播放";
-                        
-                        const playOnClick = () => {
-                            audioPlayer.play().catch(e => {
-                                statusText.textContent = "播放失败: " + e.message;
+                    // 尝试静音播放
+                    const playPromise = audioPlayer.play();
+
+                    if (playPromise !== undefined) {
+                        playPromise
+                            .then(() => {
+                                // 自动播放成功！现在取消静音。
+                                statusText.textContent = "正在播放...";
+                                audioPlayer.muted = false; // 取消静音
+                            })
+                            .catch(error => {
+                                // 自动播放失败（即使静音也可能失败）
+                                console.log('自动播放被阻止:', error);
+                                statusText.textContent = "点击页面任意处开始播放";
+
+                                // 设置一个全局点击事件来触发播放
+                                const playOnClick = () => {
+                                    audioPlayer.muted = false; // 先确保取消静音
+                                    audioPlayer.play()
+                                        .then(() => {
+                                            statusText.textContent = "正在播放...";
+                                        })
+                                        .catch(e => {
+                                            statusText.textContent = "播放失败: " + e.message;
+                                        });
+                                    // 移除点击监听，防止重复触发
+                                    document.removeEventListener('click', playOnClick);
+                                };
+                                // 添加点击监听
+                                document.addEventListener('click', playOnClick);
                             });
-                            document.removeEventListener('click', playOnClick);
-                        };
-                        document.addEventListener('click', playOnClick);
-                    });
-                }, 1000);
+                    }
+                }, 500); // 500毫秒延迟
             }
             
             // 复制URL功能
@@ -107,7 +129,7 @@
             
             // 初始化播放器函数
             function initPlayer(file) {
-                // 设置音频源 - 修改为Netlify路径
+                // 设置音频源 - Netlify路径
                 audioPlayer.src = `/audio/${encodeURIComponent(file)}`;
                 audioPlayer.crossOrigin = "anonymous"; // 添加CORS支持
                 
@@ -126,6 +148,7 @@
                 
                 // 播放控制
                 playBtn.addEventListener('click', function() {
+                    audioPlayer.muted = false; // 确保点击播放时不是静音状态
                     audioPlayer.play().catch(e => {
                         statusText.textContent = "播放失败: " + e.message;
                     });
